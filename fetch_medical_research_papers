@@ -1,0 +1,76 @@
+import argparse
+import csv
+import requests
+import re
+from typing import List, Dict, Optional
+
+BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+
+def fetch_pubmed_results(query: str) -> List[str]:
+    """Fetches PubMed IDs based on the search query."""
+    search_url = f"{BASE_URL}esearch.fcgi?db=pubmed&term={query}&retmode=json"
+    response = requests.get(search_url)
+    response.raise_for_status()
+    data = response.json()
+    return data.get("esearchresult", {}).get("idlist", [])
+
+def fetch_paper_details(pubmed_id: str) -> Optional[Dict]:
+    """Fetches details for a given PubMed ID."""
+    fetch_url = f"{BASE_URL}esummary.fcgi?db=pubmed&id={pubmed_id}&retmode=json"
+    response = requests.get(fetch_url)
+    response.raise_for_status()
+    data = response.json()
+    result = data.get("result", {}).get(pubmed_id, {})
+    if not result:
+        return None
+    return {
+        "PubmedID": pubmed_id,
+        "Title": result.get("title", "N/A"),
+        "Publication Date": result.get("pubdate", "N/A"),
+    }
+
+def extract_non_academic_authors(authors: List[Dict]) -> List[str]:
+    """Identifies non-academic authors based on affiliation heuristics."""
+    non_academic = []
+    for author in authors:
+        if "affiliation" in author and not re.search(r"university|college|institute|lab", author["affiliation"], re.I):
+            non_academic.append(author["name"])
+    return non_academic
+
+def save_to_csv(data: List[Dict], filename: str):
+    """Saves the extracted research papers to a CSV file."""
+    with open(filename, mode="w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=["PubmedID", "Title", "Publication Date", "Non-academic Author(s)", "Company Affiliation(s)", "Corresponding Author Email"])
+        writer.writeheader()
+        writer.writerows(data)
+
+def main():
+    parser = argparse.ArgumentParser(description="Fetch PubMed research papers based on a query.")
+    parser.add_argument("query", type=str, help="Search query for PubMed.")
+    parser.add_argument("-f", "--file", type=str, help="Filename to save results.")
+    parser.add_argument("-d", "--debug", action="store_true", help="Enable debug mode.")
+    args = parser.parse_args()
+    
+    if args.debug:
+        print(f"Fetching results for query: {args.query}")
+    
+    pubmed_ids = fetch_pubmed_results(args.query)
+    results = []
+    
+    for pubmed_id in pubmed_ids:
+        details = fetch_paper_details(pubmed_id)
+        if details:
+            # Placeholder for author extraction and company identification
+            details["Non-academic Author(s)"] = []
+            details["Company Affiliation(s)"] = []
+            details["Corresponding Author Email"] = "N/A"
+            results.append(details)
+    
+    if args.file:
+        save_to_csv(results, args.file)
+        print(f"Results saved to {args.file}")
+    else:
+        print(results)
+
+if __name__ == "__main__":
+    main()
